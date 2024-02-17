@@ -47,11 +47,11 @@ public class DeliveryManager : MonoBehaviour {
             if (waitingRecipeSO.kitchenObjectSOList.Count == plateKitchenObject.GetKitchenObjectSOList().Count) {
                 // Has the same number of ingredients
                 bool plateContentsMatchesRecipe = true;
-                foreach (KitchenObjectSO kitchenObjectSO in waitingRecipeSO.kitchenObjectSOList) {
+                foreach (KitchenObjectSO recipeKitchenObjectSO in waitingRecipeSO.kitchenObjectSOList) {
                     // Cycling through all ingredients in the recipe
                     bool ingredientFound = false;
                     foreach (KitchenObjectSO plateKitchenObjectSO in plateKitchenObject.GetKitchenObjectSOList()) {
-                        if (plateKitchenObjectSO == recipeListSO) {
+                        if (plateKitchenObjectSO == recipeKitchenObjectSO) {
                             // Ingredient matches!
                             ingredientFound = true;
                             break;
