@@ -1,12 +1,18 @@
 using System;
-using System.Collections;
-using System.Collections.Generic;
-using UnityEditor;
 using UnityEngine;
-using UnityEngine.UI;
+using Unity.Netcode;
+using System.Collections.Generic;
 
-public class Player : MonoBehaviour, IKitchenObjectParent {
-    public static Player Instance { get; private set; }
+public class Player : NetworkBehaviour, IKitchenObjectParent {
+
+    public static event EventHandler OnAnyPlayerSpawned;
+    public static event EventHandler OnAnyPickSomething;
+
+    public static void ResetStaticData() {
+        OnAnyPlayerSpawned = null;
+    }
+
+    public static Player LocalInstance { get; private set; }
 
     public event EventHandler OnPickSomething;
     public event EventHandler<OnSelectedCounterChangedEventArgs> OnSelectedCounterChanged;
@@ -15,25 +21,43 @@ public class Player : MonoBehaviour, IKitchenObjectParent {
     }
 
     [SerializeField] private float moveSpeed = 7f;
-    [SerializeField] private GameInput gameInput;
     [SerializeField] private LayerMask counterLayerMask;
+    [SerializeField] private LayerMask collisionLayerMask;
     [SerializeField] private Transform kitchenObjectHoldPoint;
+    [SerializeField] private List<Vector3> spawnPositionList;
+    [SerializeField] private PlayerVisual playerVisual;
 
     private bool isWalking;
     private Vector3 lastInteractDir;
     private BaseCounter selectedCounter;
     private KitchenObject kitchenObject;
 
-    private void Awake() {
-        if (Instance != null) {
-            Debug.LogError("There is more than one Player instance");
-        }
-        Instance = this;
+    private void Start() {
+        GameInput.Instance.OnInteractAction += GameInput_OnInteractAction;
+        GameInput.Instance.OnInteractAlternateAction += GameInput_OnInteractAlternateAction;
+
+        PlayerData playerData = KitchenGameMultiplayer.Instance.GetPlayerDataFromClientId(OwnerClientId);
+        playerVisual.SetPlayerColor(KitchenGameMultiplayer.Instance.GetPlayerColor(playerData.colorId));
     }
 
-    private void Start() {
-        gameInput.OnInteractAction += GameInput_OnInteractAction;
-        gameInput.OnInteractAlternateAction += GameInput_OnInteractAlternateAction;
+    public override void OnNetworkSpawn() {
+        if (IsOwner) {
+            LocalInstance = this;
+        }
+
+        transform.position = spawnPositionList[KitchenGameMultiplayer.Instance.GetPlayerDataIndexFromClientId(OwnerClientId)];
+
+        OnAnyPlayerSpawned?.Invoke(this, EventArgs.Empty);
+
+        if (IsServer) {
+            NetworkManager.Singleton.OnClientConnectedCallback += NetworkManager_OnClientConnectedCallback;
+        }
+    }
+
+    private void NetworkManager_OnClientConnectedCallback(ulong clientId) {
+        if (clientId == OwnerClientId && HasKitchenObject()) {
+            KitchenObject.DestroyKitchenObject(GetKitchenObject());
+        }
     }
 
     private void GameInput_OnInteractAlternateAction(object sender, EventArgs e) {
@@ -53,6 +77,8 @@ public class Player : MonoBehaviour, IKitchenObjectParent {
     }
 
     private void Update() {
+        if (!IsOwner) return;
+
         HandleMovement();
         HandleInteractions();
     }
@@ -62,7 +88,7 @@ public class Player : MonoBehaviour, IKitchenObjectParent {
     }
 
     private void HandleInteractions() {
-        Vector2 inputVector = gameInput.GetMovementVectorNormalized();
+        Vector2 inputVector = GameInput.Instance.GetMovementVectorNormalized();
 
         Vector3 moveDir = new Vector3(inputVector.x, 0, inputVector.y);
 
@@ -86,21 +112,21 @@ public class Player : MonoBehaviour, IKitchenObjectParent {
     }
 
     private void HandleMovement() {
-        Vector2 inputVector = gameInput.GetMovementVectorNormalized();
+        Vector2 inputVector = GameInput.Instance.GetMovementVectorNormalized();
 
         Vector3 moveDir = new Vector3(inputVector.x, 0f, inputVector.y);
 
         float moveDistance = moveSpeed * Time.deltaTime;
         float playerRadius = 0.7f;
         float playerHeight = 2f;
-        bool canMove = !Physics.CapsuleCast(transform.position, transform.position + Vector3.up * playerHeight, playerRadius, moveDir, moveDistance);
+        bool canMove = !Physics.BoxCast(transform.position, Vector3.one * playerRadius, moveDir, Quaternion.identity, moveDistance, collisionLayerMask);
 
         if (!canMove) {
             // Cannot move towards moveDir
 
             // Attempt only X movement
             Vector3 moveDirX = new Vector3(moveDir.x, 0, 0).normalized;
-            canMove = (moveDir.x < -0.5f || moveDir.x > 0.5f) && !Physics.CapsuleCast(transform.position, transform.position + Vector3.up * playerHeight, playerRadius, moveDirX, moveDistance);
+            canMove = (moveDir.x < -0.5f || moveDir.x > 0.5f) && !Physics.BoxCast(transform.position, Vector3.one * playerRadius, moveDirX, Quaternion.identity, moveDistance, collisionLayerMask);
 
             if (canMove) {
                 // Can move only on the X
@@ -110,7 +136,7 @@ public class Player : MonoBehaviour, IKitchenObjectParent {
 
                 // Attempt only Z movement
                 Vector3 moveDirZ = new Vector3(0, 0, moveDir.z).normalized;
-                canMove = (moveDir.z < -0.5f || moveDir.z > 0.5f) && !Physics.CapsuleCast(transform.position, transform.position + Vector3.up * playerHeight, playerRadius, moveDirZ, moveDistance);
+                canMove = (moveDir.z < -0.5f || moveDir.z > 0.5f) && !Physics.BoxCast(transform.position, Vector3.one * playerRadius, moveDirZ, Quaternion.identity, moveDistance, collisionLayerMask);
 
                 if (canMove) {
                     // Can move only on the Z
@@ -149,6 +175,7 @@ public class Player : MonoBehaviour, IKitchenObjectParent {
 
         if (kitchenObject != null) {
             OnPickSomething?.Invoke(this, EventArgs.Empty);
+            OnAnyPickSomething?.Invoke(this, EventArgs.Empty);
         }
     }
 
@@ -162,5 +189,9 @@ public class Player : MonoBehaviour, IKitchenObjectParent {
 
     public bool HasKitchenObject() {
         return kitchenObject != null;
+    }
+
+    public NetworkObject GetNetworkObject() {
+        return NetworkObject;
     }
 }
